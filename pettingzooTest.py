@@ -10,46 +10,23 @@ import string
 import numpy as np
 import gym
 
-# class BigEnv(AECEnv, agents):
-    # def __init__(self):
-    #     self.nclusters = 2
-    #     self.clusters = [agents[i::2] for i in range(self.nclusters)]
-    #
-    #     self.envs = []
-    #     for cluster in self.cluster:
-    #         self.envs += [SmallEnv(cluster)]
-    #
-    # def reset(self):
-    #     return obs
-    #
-    # def get_reward(self):
-    #     return reward
-    #
-    # def get_done(self):
-    #     return done
-    #
-    # def get_info(self):
-    #     return info
-    #
-    # def step(self, action):
-    #     return obs, self.get_reward(), self.get_done(), self.get_info()
-    #
-    # def state(self):
-    #     return obs
-
 class MyEnv(ParallelEnv):
-    def __init__(self, agents, grid):
-        self.agents = agents
-        self.possible_agents = self.agents[:]
+    def __init__(self, grid):
         self.grid = grid
-        self.observation_spaces = dict(zip(self.agents, [gym.spaces.Box(low=0, high=2, shape=(1,))]))
-        self.action_spaces = dict(zip(self.agents, [gym.spaces.Box(low=-1, high=1, shape=(1,))]))
+        self.agents = list(self.grid['name'])
+        self.possible_agents = self.agents[:]
+
+        self.observation_spaces = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.agents}
+        self.action_spaces = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.agents}
+        print(self.observation_spaces, self.action_spaces)
 
         self.metadata = {'render.modes': []}
         self.metadata['name'] = "my_env"
+        self.ts = 0
 
     def shape_obs(self, obs_dict):
         for k, v in obs_dict.items():
+            # if v is a dataframe entry then it's a float, cast to np.array()
             try:
                 v.shape
             except:
@@ -58,13 +35,13 @@ class MyEnv(ParallelEnv):
 
     def reset(self):
         obs = self.grid.set_index('name').to_dict()['observation']
-        obs = self.shape_obs(obs)
+        obs = self.shape_obs(obs) # dict is key: <type float> change to key: <type ndarray>
         return obs
 
     def get_reward(self):
         rewards = {}
         for agent in self.agents:
-            rewards[agent] = self.grid.loc[self.grid.name==agent, 'observation']
+            rewards[agent] = float(self.grid.loc[self.grid.name==agent, 'observation'])
         return rewards
 
     def get_done(self):
@@ -81,8 +58,10 @@ class MyEnv(ParallelEnv):
 
     def step(self, action_dict):
         for agent in self.agents:
-            self.grid.loc[self.grid.name==agent, 'observation'] = np.random.randint(3)
+            self.grid.loc[self.grid.name==agent, 'observation'] = action_dict[agent]
         obs = self.grid.set_index('name').to_dict()['observation']
+        print(self.ts)
+        self.ts += 1
         obs = self.shape_obs(obs)
         return obs, self.get_reward(), self.get_done(), self.get_info()
 
@@ -93,28 +72,25 @@ class MyEnv(ParallelEnv):
 
 if __name__=="__main__":
     from pettingzoo.test import api_test, parallel_api_test
+    from pettingzoo.mpe import simple_push_v2
     import random
     import string
     from stable_baselines3.ppo import MlpPolicy
     from stable_baselines3 import PPO
-    from stable_baselines3.sac.policies import MlpPolicy
-    from stable_baselines3 import SAC
     import pandas as pd
     import multiprocessing
     print('done with imports')
     multiprocessing.set_start_method("fork")
 
-    agents = [''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(5)) for _ in range(4)]
-    df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(4)]})
-    env = MyEnv(agents, df)
+    agents = [''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(5)) for _ in range(2)]
+    df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(2)]})
+    env = MyEnv(df)
 
-    print('modifying env')
-    env = ss.pad_observations_v0(env)
-    env = ss.black_death_v1(env)
+    # parallel_api_test(env)
+
     env = ss.pettingzoo_env_to_vec_env_v0(env)
     env = ss.concat_vec_envs_v0(env, 4, num_cpus=4, base_class='stable_baselines3')
 
-    print('making model')
-    model = PPO(MlpPolicy, env)
-    # for agent in agents()s
-    print('done with this')
+    model = PPO(MlpPolicy, env, verbose=2, gamma=0.999, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1, tensorboard_log="./ppo_test/")
+    model.learn(10)
+    print('done learning')
