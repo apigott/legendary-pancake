@@ -1,8 +1,6 @@
 from stable_baselines3.ppo import MlpPolicy
 from stable_baselines3 import PPO
-# from stable_baselines3.common.vec_env import VecMonitor
 import supersuit as ss
-# from petting_bubble_env_continuous import PettingBubblesEnvironment
 from pettingzoo import ParallelEnv
 import pandas as pd
 import random
@@ -10,87 +8,148 @@ import string
 import numpy as np
 import gym
 
+class MyGrid:
+    def __init__(self, dataframe, nclusters):
+        self.nclusters = nclusters
+        self.df = dataframe
+        self.possible_agents = list(self.df['name'])
+        self.clusters = self.set_clusters()
+        self.cluster = self.clusters[0]
+        self.ts = 1
+
+    def set_clusters(self):
+        clusters = []
+        for i in range(2):
+            clusters += [self.possible_agents[i::self.nclusters]]
+        return clusters
+
+    def get_action_space(self):
+        aspace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.cluster}
+        return aspace
+
+    def get_observation_space(self):
+        ospace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.cluster}
+        return ospace
+
+    def get_spaces(self):
+        self.cluster = self.clusters[self.ts % 2]
+        self.ts += 1
+        return self.get_action_space(), self.get_observation_space()
+
 class MyEnv(ParallelEnv):
     def __init__(self, grid):
         self.grid = grid
-        self.agents = list(self.grid['name'])
+        self.agents = list(self.grid.df['name'])
         self.possible_agents = self.agents[:]
+        self.clusters = self.set_clusters()
 
-        self.observation_spaces = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.agents}
-        self.action_spaces = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.agents}
-        print(self.observation_spaces, self.action_spaces)
+        self.agents = self.grid.cluster
+        self.action_spaces, self.observation_spaces = self.grid.get_spaces()
 
-        self.metadata = {'render.modes': []}
-        self.metadata['name'] = "my_env"
+        self.metadata = {'render.modes': [], 'name':"my_env"}
         self.ts = 0
 
-    def shape_obs(self, obs_dict):
-        for k, v in obs_dict.items():
-            # if v is a dataframe entry then it's a float, cast to np.array()
-            try:
-                v.shape
-            except:
-                obs_dict[k] = np.array([v])
-        return obs_dict
+    def set_other_env(self, env):
+        self.other_env = env
+
+    def set_clusters(self):
+        clusters = []
+        for i in range(2):
+            clusters += [self.possible_agents[i::2]]
+        return clusters
+
+    def get_action_space(self):
+        return {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.agents}
+
+    def get_observation_space(self):
+        return {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in self.agents}
 
     def reset(self):
-        obs = self.grid.set_index('name').to_dict()['observation']
-        obs = self.shape_obs(obs) # dict is key: <type float> change to key: <type ndarray>
+        print('calling reset')
+        self.ts = 0
+        return self.state()
+
+    def state(self):
+        obs = self.grid.df.set_index('name').to_dict()['observation']
+        obs = {k: np.array([obs[k]]) for k in self.agents}
         return obs
 
     def get_reward(self):
-        rewards = {}
-        for agent in self.agents:
-            rewards[agent] = float(self.grid.loc[self.grid.name==agent, 'observation'])
+        rewards = {agent: float(self.grid.df.loc[self.grid.df.name==agent, 'observation']) for agent in self.agents}
         return rewards
 
     def get_done(self):
-        dones = {}
-        for agent in self.agents:
-            dones[agent] = False
+        dones = {agent: False for agent in self.agents}
         return dones
 
     def get_info(self):
-        infos = {}
-        for agent in self.agents:
-            infos[agent] = []
+        infos = {agent: {} for agent in self.agents}
         return infos
 
     def step(self, action_dict):
-        for agent in self.agents:
-            self.grid.loc[self.grid.name==agent, 'observation'] = action_dict[agent]
-        obs = self.grid.set_index('name').to_dict()['observation']
-        print(self.ts)
+        print(self.agents, action_dict.keys())
+        # assign an env name just so I can keep track
+#         # select the agents that will be active this round
+#         self.agents = self.possible_agents[(self.ts%2)::2]
+        for agent in action_dict.keys():
+            self.grid.df.loc[self.grid.df.name==agent, 'observation'] = action_dict[agent]
+            self.other_env.grid.df.loc[self.other_env.grid.df.name==agent, 'observation'] = action_dict[agent]
+
         self.ts += 1
-        obs = self.shape_obs(obs)
+
+        # for debugging purposes
+        print("action", action_dict)
+        print(self.grid.df)
+        obs = self.state()
+        key = list(obs.keys())[0]
+        # print(obs[key], obs[key].shape)
+
         return obs, self.get_reward(), self.get_done(), self.get_info()
 
-    def state(self):
-        obs = self.grid.set_index('name').to_dict()['observation']
-        obs = self.shape_obs(obs)
-        return obs
-
-if __name__=="__main__":
-    from pettingzoo.test import api_test, parallel_api_test
-    from pettingzoo.mpe import simple_push_v2
-    import random
-    import string
-    from stable_baselines3.ppo import MlpPolicy
-    from stable_baselines3 import PPO
-    import pandas as pd
+if __name__=='__main__':
     import multiprocessing
-    print('done with imports')
-    multiprocessing.set_start_method("fork")
+    import sys
+    from pettingzoo.test import parallel_api_test
 
-    agents = [''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(5)) for _ in range(2)]
-    df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(2)]})
-    env = MyEnv(df)
+    # multiprocessing.set_start_method("fork")
 
+    nagents = 5
+    agents = [''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(5)) for _ in range(nagents)]
+    df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(nagents)]})
+    grid = MyGrid(df, 1)
+
+    env = MyEnv(grid)
+    env2 = MyEnv(grid)
+    env.set_other_env(env2)
+    env2.set_other_env(env)
     # parallel_api_test(env)
 
-    env = ss.pettingzoo_env_to_vec_env_v0(env)
-    env = ss.concat_vec_envs_v0(env, 4, num_cpus=4, base_class='stable_baselines3')
+    env = ss.black_death_v1(env)
+    env2 = ss.black_death_v1(env2)
 
-    model = PPO(MlpPolicy, env, verbose=2, gamma=0.999, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1, tensorboard_log="./ppo_test/")
-    model.learn(10)
-    print('done learning')
+    env = ss.pettingzoo_env_to_vec_env_v0(env)
+    env2 = ss.pettingzoo_env_to_vec_env_v0(env2)
+
+    env = ss.concat_vec_envs_v0(env, 2, num_cpus=2, base_class='stable_baselines3')
+    env2 = ss.concat_vec_envs_v0(env2, 2, num_cpus=2, base_class='stable_baselines3')
+
+    print('hi')
+    envs = [env, env2]
+    models = []
+    models += [PPO(MlpPolicy, env, verbose=2, gamma=0.999, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1, tensorboard_log="./ppo_test/")]
+    models += [PPO(MlpPolicy, env2, verbose=2, gamma=0.999, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1, tensorboard_log="./ppo_test/")]
+    for _ in range(10): # timesteps
+        for model in models:
+            model.learn(1, reset_num_timesteps=False)
+
+    print("XXXXXXXXXXXXX")
+    obs = env.reset()
+    for _ in range(10):
+        for m in range(len(models)):
+            # obs = env.state()
+            action = models[m].predict(obs)[0]
+            obs, reward, done, info = envs[m].step(action)
+            obs, reward, done, info = envs[(m+1)%2].step(action)
+
+    # # # multiprocessing pool hangs but I'm not sure where to close it
+    # # print('learning done')
