@@ -46,8 +46,7 @@ class MyGrid:
 class MyEnv(ParallelEnv):
     def __init__(self, grid, tag):
         self.tag = tag
-        self.grid = copy(grid)
-        self.df = copy(self.grid.df)
+        self.grid = grid
         self.agents = list(self.grid.df['name'])
 
         self.agents = self.grid.clusters.pop()
@@ -63,17 +62,18 @@ class MyEnv(ParallelEnv):
         return self.state(0)
 
     def state(self, index):
-        if os.path.isfile(f'temp_{index}.csv'):
-            df = pd.read_csv(f'temp_{index}.csv')
-        else:
-            df = self.grid.df
-        obs = df.set_index('name').to_dict()['observation']
+        # if os.path.isfile(f'temp_{index}.csv'):
+        #     df = pd.read_csv(f'temp_{index}.csv')
+        # else:
+        #     df = self.grid.df
+        # df = pd.read_csv(f'temp_{index}.csv')
+        obs = self.grid.df.set_index('name').to_dict()['observation']
         obs = {k: np.array([obs[k]]) for k in self.agents}
         return obs
 
     def get_reward(self, index):
-        df = pd.read_csv(f'temp_{index}.csv')
-        rewards = {agent: float(df.loc[df.name==agent, 'observation']) for agent in self.agents}
+        # df = pd.read_csv(f'temp_{index}.csv')
+        rewards = {agent: float(self.grid.df.loc[self.grid.df.name==agent, 'observation']) for agent in self.agents}
         return rewards
 
     def get_done(self):
@@ -85,20 +85,26 @@ class MyEnv(ParallelEnv):
         return infos
 
     def step(self, action_dict, index):
-        print(f"calling step on index {index}")
-        if os.path.isfile(f'temp_{index}.csv'):
-            df = pd.read_csv(f'temp_{index}.csv')
-        else:
-            df = self.grid.df
         if index == 0:
-            print(df)
+            print(f"calling step on index {index}, {self.agents}")
+        # if os.path.isfile(f'temp_{index}.csv'):
+        #     df = pd.read_csv(f'temp_{index}.csv')
+        # else:
+        #     df = self.grid.df
+        # if index == 0:
+        #     print(df)
+        # if index == 0:
+        #     print(self.grid.df)
 
         for agent in action_dict.keys():
-            df.loc[df.name==agent, 'observation'] = action_dict[agent]
+            self.grid.df.loc[self.grid.df.name==agent, 'observation'] = action_dict[agent]
 
         obs = self.state(index)
-        df.to_csv(f'temp_{index}.csv', index=False)
-
+        # df.to_csv(f'temp_{index}.csv', index=False)
+        # print(self.grid.ts, hex(id(self.grid.ts)))
+        if index == 0:
+            print(self.grid.df)
+        self.grid.ts += 1
         return obs, self.get_reward(index), self.get_done(), self.get_info()
 
 nagents = 4
@@ -106,30 +112,33 @@ agents = ['a','b','c','d']
 df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(nagents)]})
 grid = MyGrid(df, 2)
 
-env = MyEnv(grid, "env")
-env2 = MyEnv(grid, "env2")
+# print("grid ", hex(id(grid)))
+# x = grid
+# print("assignment ", hex(id(x)))
+# print("copy of ", hex(id(copy(grid))))
+# print("copy of ", hex(id(deepcopy(grid))))
+envs = [MyEnv(grid, "env"), MyEnv(grid, "env2")]
+envs = [ss.pettingzoo_env_to_vec_env_v0(env) for env in envs]
+envs = [ss.concat_vec_envs_v0(env, 2, num_cpus=1, base_class='stable_baselines3') for env in envs]
 
-env = ss.pettingzoo_env_to_vec_env_v0(env)
-env2 = ss.pettingzoo_env_to_vec_env_v0(env2)
+original_grids = [envs[0].venv.vec_envs[0].par_env.grid, envs[0].venv.vec_envs[0].par_env.grid]
+envs[1].venv.vec_envs[0].par_env.grid = envs[0].venv.vec_envs[0].par_env.grid
+envs[1].venv.vec_envs[1].par_env.grid = envs[0].venv.vec_envs[1].par_env.grid
 
-env = ss.concat_vec_envs_v0(env, 2, num_cpus=1, base_class='stable_baselines3')
-env2 = ss.concat_vec_envs_v0(env2, 2, num_cpus=1, base_class='stable_baselines3')
+models = [PPO(MlpPolicy, env, verbose=2, gamma=0.999, batch_size=2, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1) for env in envs]
 
-models = []
-models += [PPO(MlpPolicy, env, verbose=2, gamma=0.999, batch_size=2, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1, tensorboard_log="./ppo_test/")]
-models += [PPO(MlpPolicy, env2, verbose=2, gamma=0.999, batch_size=2, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1, tensorboard_log="./ppo_test/")]
-for i in range(100): # timesteps
-    for m in range(len(models)):
-        models[m].learn(1, reset_num_timesteps=False)
+for _ in range(100):
+    for model in models:
+        model.learn(1, reset_num_timesteps=False)
 
-envs = [env, env2]
-obs2 = env2.reset()
-obs = env.reset()
+obss = [env.reset() for env in envs]
 for _ in range(5):
     for m in range(len(models)):
-        obs = [np.concatenate(list(envs[m].venv.vec_envs[i].par_env.state(i).values())) for i in range(len(envs[m].venv.vec_envs))]
-        obs = np.concatenate(obs)
-        obs = obs.reshape(4,1)
+        obss[m] = [np.concatenate(list(envs[m].venv.vec_envs[i].par_env.state(i).values())) for i in range(len(envs[m].venv.vec_envs))]
+        # print([envs[m].venv.vec_envs[i].par_env.grid for i in range(len(envs[m].venv.vec_envs))])
+        obss[m] = np.concatenate(obss[m])
+        obss[m] = obss[m].reshape(-1,1)
 
-        action = models[m].predict(obs)[0]
-        obs, reward, done, info = envs[m].step(action)
+        action = models[m].predict(obss[m])[0]
+        # print("ACTION", action)
+        obss[m], reward, done, info = envs[m].step(action)
