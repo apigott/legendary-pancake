@@ -44,8 +44,7 @@ class MyGrid:
         return self.get_action_space(agents), self.get_observation_space(agents)
 
 class MyEnv(ParallelEnv):
-    def __init__(self, grid, tag):
-        self.tag = tag
+    def __init__(self, grid):
         self.grid = grid
         self.agents = list(self.grid.df['name'])
 
@@ -59,9 +58,9 @@ class MyEnv(ParallelEnv):
 
     def reset(self):
         print('calling reset')
-        return self.state(0)
+        return self.state()
 
-    def state(self, index):
+    def state(self):
         # if os.path.isfile(f'temp_{index}.csv'):
         #     df = pd.read_csv(f'temp_{index}.csv')
         # else:
@@ -71,7 +70,7 @@ class MyEnv(ParallelEnv):
         obs = {k: np.array([obs[k]]) for k in self.agents}
         return obs
 
-    def get_reward(self, index):
+    def get_reward(self):
         # df = pd.read_csv(f'temp_{index}.csv')
         rewards = {agent: float(self.grid.df.loc[self.grid.df.name==agent, 'observation']) for agent in self.agents}
         return rewards
@@ -84,46 +83,37 @@ class MyEnv(ParallelEnv):
         infos = {agent: {} for agent in self.agents}
         return infos
 
-    def step(self, action_dict, index):
-        if index == 0:
-            print(f"calling step on index {index}, {self.agents}")
-        # if os.path.isfile(f'temp_{index}.csv'):
-        #     df = pd.read_csv(f'temp_{index}.csv')
-        # else:
-        #     df = self.grid.df
-        # if index == 0:
-        #     print(df)
-        # if index == 0:
-        #     print(self.grid.df)
-
+    def step(self, action_dict):
         for agent in action_dict.keys():
             self.grid.df.loc[self.grid.df.name==agent, 'observation'] = action_dict[agent]
 
-        obs = self.state(index)
+        obs = self.state()
         # df.to_csv(f'temp_{index}.csv', index=False)
         # print(self.grid.ts, hex(id(self.grid.ts)))
-        if index == 0:
-            print(self.grid.df)
+
+        print(self.grid.df)
         self.grid.ts += 1
-        return obs, self.get_reward(index), self.get_done(), self.get_info()
+        return obs, self.get_reward(), self.get_done(), self.get_info()
 
 nagents = 4
 agents = ['a','b','c','d']
 df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(nagents)]})
-grid = MyGrid(df, 2)
+grid = MyGrid(df,2)
 
 # print("grid ", hex(id(grid)))
 # x = grid
 # print("assignment ", hex(id(x)))
 # print("copy of ", hex(id(copy(grid))))
 # print("copy of ", hex(id(deepcopy(grid))))
-envs = [MyEnv(grid, "env"), MyEnv(grid, "env2")]
+envs = [MyEnv(grid), MyEnv(grid)]
 envs = [ss.pettingzoo_env_to_vec_env_v0(env) for env in envs]
-envs = [ss.concat_vec_envs_v0(env, 2, num_cpus=1, base_class='stable_baselines3') for env in envs]
 
-original_grids = [envs[0].venv.vec_envs[0].par_env.grid, envs[0].venv.vec_envs[0].par_env.grid]
-envs[1].venv.vec_envs[0].par_env.grid = envs[0].venv.vec_envs[0].par_env.grid
-envs[1].venv.vec_envs[1].par_env.grid = envs[0].venv.vec_envs[1].par_env.grid
+nenvs = 2
+envs = [ss.concat_vec_envs_v0(env, nenvs, num_cpus=1, base_class='stable_baselines3') for env in envs]
+
+for env in envs[1:]:
+    for n in range(nenvs):
+        env.venv.vec_envs[n].par_env.grid = envs[0].venv.vec_envs[n].par_env.grid
 
 models = [PPO(MlpPolicy, env, verbose=2, gamma=0.999, batch_size=2, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1) for env in envs]
 
@@ -134,11 +124,9 @@ for _ in range(100):
 obss = [env.reset() for env in envs]
 for _ in range(5):
     for m in range(len(models)):
-        obss[m] = [np.concatenate(list(envs[m].venv.vec_envs[i].par_env.state(i).values())) for i in range(len(envs[m].venv.vec_envs))]
-        # print([envs[m].venv.vec_envs[i].par_env.grid for i in range(len(envs[m].venv.vec_envs))])
+        obss[m] = [np.concatenate(list(envs[m].venv.vec_envs[i].par_env.state().values())) for i in range(len(envs[m].venv.vec_envs))]
         obss[m] = np.concatenate(obss[m])
         obss[m] = obss[m].reshape(-1,1)
 
         action = models[m].predict(obss[m])[0]
-        # print("ACTION", action)
         obss[m], reward, done, info = envs[m].step(action)
