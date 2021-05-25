@@ -1,132 +1,139 @@
+# RL imports
 from stable_baselines3.ppo import MlpPolicy
 from stable_baselines3 import PPO
 import supersuit as ss
 from pettingzoo import ParallelEnv
-import pandas as pd
-import random
-import string
-import numpy as np
-import gym
-import os
-
-import multiprocessing
-import sys
 from pettingzoo.test import parallel_api_test
+import gym
 
+# other useful stuff
+import pandas as pd
+import random, string
+import numpy as np
 from copy import deepcopy, copy
 
+# this represents the CityLearn grid
 class MyGrid:
     def __init__(self, dataframe, nclusters):
         self.nclusters = nclusters
-        self.df = dataframe
+        self.df = dataframe # analogous to the pandapower network (dataframes)
         self.possible_agents = list(self.df['name'])
         self.clusters = self.set_clusters()
-        self.cluster = self.clusters[0]
-        self.file = "temp.csv"
-        self.df.to_csv(self.file, index=False)
         self.ts = 0
 
     def set_clusters(self):
         clusters = []
-        for i in range(2):
+        for i in range(self.nclusters): # let every other agent be on the opposing team
             clusters += [self.possible_agents[i::self.nclusters]]
         return clusters
 
     def get_action_space(self, agents):
+        # return the action space of each agent {agent: gym.space(data)}
         aspace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in agents}
         return aspace
 
     def get_observation_space(self, agents):
+        # return the observation space of each agent {agent: gym.space(data)}
         ospace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in agents}
         return ospace
 
-    def get_spaces(self, agents):
-        return self.get_action_space(agents), self.get_observation_space(agents)
-
 class MyEnv(ParallelEnv):
     def __init__(self, grid):
-        self.grid = grid
-        self.agents = list(self.grid.df['name'])
-
-        self.agents = self.grid.clusters.pop()
+        # initialize env with one team of agents
+        self.agents = grid.clusters.pop()
         self.possible_agents = self.agents[:]
-        self.action_spaces, self.observation_spaces = self.grid.get_spaces(self.agents)
+        # and get the corresponding actionspaces
+        self.action_spaces = grid.get_action_space(self.agents)
+        self.observation_spaces = grid.get_observation_space(self.agents)
 
-        self.metadata = {'render.modes': [], 'name':"my_env"}
-        self.file='temp.csv'
-        self.ts = 0
+        self.metadata = {'render.modes': [], 'name':"my_env"} # gym stuff, not used
+        self.ts = 0 # if we want to track num. steps these agents have taken
 
     def reset(self):
-        print('calling reset')
+        # reset the environment to something randomized
+        for agent in self.agents:
+            self.grid.df.loc[self.grid.df.name==agent, 'observation'] = np.random.uniform(0,1)
         return self.state()
 
     def state(self):
-        # if os.path.isfile(f'temp_{index}.csv'):
-        #     df = pd.read_csv(f'temp_{index}.csv')
-        # else:
-        #     df = self.grid.df
-        # df = pd.read_csv(f'temp_{index}.csv')
-        obs = self.grid.df.set_index('name').to_dict()['observation']
-        obs = {k: np.array([obs[k]]) for k in self.agents}
+        # return the observed state {agent: np.array(data)}
+        obs = {agent: np.array(float(self.grid.df.loc[self.grid.df.name==agent, 'observation'])) for agent in self.agents}
         return obs
 
     def get_reward(self):
-        # df = pd.read_csv(f'temp_{index}.csv')
+        # return reward {agent: float(data)}
+        # in this case, reward = state = action
         rewards = {agent: float(self.grid.df.loc[self.grid.df.name==agent, 'observation']) for agent in self.agents}
         return rewards
 
     def get_done(self):
+        # environment never ends, return {agent: bool(data)}
         dones = {agent: False for agent in self.agents}
         return dones
 
     def get_info(self):
+        # no additional info to track
         infos = {agent: {} for agent in self.agents}
         return infos
 
     def step(self, action_dict):
+        # input: actions to take = {agent: action}
+        # output: dictionaries of format {agent: data} for obs, reward, done, info
         for agent in action_dict.keys():
             self.grid.df.loc[self.grid.df.name==agent, 'observation'] = action_dict[agent]
 
-        obs = self.state()
-        # df.to_csv(f'temp_{index}.csv', index=False)
-        # print(self.grid.ts, hex(id(self.grid.ts)))
-
-        print(self.grid.df)
+        print(self.grid.df) # check how the dataframe evolves
         self.grid.ts += 1
-        return obs, self.get_reward(), self.get_done(), self.get_info()
+        self.ts += 1
+        return self.state(), self.get_reward(), self.get_done(), self.get_info()
 
-nagents = 4
-agents = ['a','b','c','d']
-df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(nagents)]})
-grid = MyGrid(df,2)
+if __name__=='__main__':
+    # create a dumb dataframe so we can see how the agents interact
+    agents = ['a','b','c','d'] # 4 agents, 2 teams
+    nteams = 2 # number of teams
+    df = pd.DataFrame({'name':agents,'observation':[np.random.uniform(0,2) for _ in range(len(agents))]})
+    grid = MyGrid(df,nteams)
 
-# print("grid ", hex(id(grid)))
-# x = grid
-# print("assignment ", hex(id(x)))
-# print("copy of ", hex(id(copy(grid))))
-# print("copy of ", hex(id(deepcopy(grid))))
-envs = [MyEnv(grid), MyEnv(grid)]
-envs = [ss.pettingzoo_env_to_vec_env_v0(env) for env in envs]
+    # create some parallel environments
+    teams = [MyEnv(grid), MyEnv(grid)]
+    # cast them to pettingzoo envs (so we can train multiple agents on them)
+    teams = [ss.pettingzoo_env_to_vec_env_v0(team) for team in teams]
+    # copy environment and stack it so we can use PPO and get [nenvs] sets of data at once
+    # each team trains on 2 environments "in parallel"
+    nenvs = 2
+    teams = [ss.concat_vec_envs_v0(team, nenvs, num_cpus=1, base_class='stable_baselines3') for team in teams]
 
-nenvs = 2
-envs = [ss.concat_vec_envs_v0(env, nenvs, num_cpus=1, base_class='stable_baselines3') for env in envs]
+    # set the grid after initialization, this way the object is shared across env instances
+    # this also saves RAM by only copying the grid when we need it
+    # (otherwise concat_vec_envs_v0 will copy it nteams*nenvs times)
+    grids = [deepcopy(grid) for n in range(nenvs)]
+    for team in teams:
+        for n in range(nenvs):
+            team.venv.vec_envs[n].par_env.grid = grids[n]
 
-for env in envs[1:]:
-    for n in range(nenvs):
-        env.venv.vec_envs[n].par_env.grid = envs[0].venv.vec_envs[n].par_env.grid
+    # create some stable baselines models
+    # batch_size = nenvs*nsteps and MUST be greater than 1
+    models = [PPO(MlpPolicy, team, verbose=2, gamma=0.999, batch_size=2, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1) for team in teams]
 
-models = [PPO(MlpPolicy, env, verbose=2, gamma=0.999, batch_size=2, n_steps=1, ent_coef=0.01, learning_rate=0.00025, vf_coef=0.5, max_grad_norm=0.5, gae_lambda=0.95, n_epochs=4, clip_range=0.2, clip_range_vf=1) for env in envs]
+    # train the models
+    for ts in range(100):
+        for model in models: # each timestep alternate through models to take turns
+            model.learn(1, reset_num_timesteps=False)
 
-for _ in range(100):
-    for model in models:
-        model.learn(1, reset_num_timesteps=False)
+    # reset the models to test them
+    obss = [team.reset() for team in teams]
+    for ts in range(5): # test on 5 timesteps
+        for m in range(len(models)): # again, alternate through models
 
-obss = [env.reset() for env in envs]
-for _ in range(5):
-    for m in range(len(models)):
-        obss[m] = [np.concatenate(list(envs[m].venv.vec_envs[i].par_env.state().values())) for i in range(len(envs[m].venv.vec_envs))]
-        obss[m] = np.concatenate(obss[m])
-        obss[m] = obss[m].reshape(-1,1)
+            # get the current observation from the perspective of the active team
+            # this can probably be cleaned up
+            foo = []
+            for e in range(nenvs):
+                bar = list(teams[m].venv.vec_envs[e].par_env.state().values())
+                foo += bar # may need additional logic to pad state/obs spaces if they aren't identical
 
-        action = models[m].predict(obss[m])[0]
-        obss[m], reward, done, info = envs[m].step(action)
+            foo = np.vstack(foo)
+            obss[m] = np.vstack(foo)
+
+            action = models[m].predict(obss[m])[0] # send it to the SB model to select an action
+            obss[m], reward, done, info = teams[m].step(action) # update environment
