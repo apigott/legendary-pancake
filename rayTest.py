@@ -45,11 +45,11 @@ class MyGrid:
         return clusters
 
     def get_action_space(self, agents):
-        aspace = {agent: gym.spaces.Box(low=-1*np.ones(10), high=np.ones(10)) for agent in agents}
+        aspace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in agents}
         return aspace
 
     def get_observation_space(self, agents):
-        ospace = {agent: gym.spaces.Box(low=-1*np.ones(10), high=np.ones(10)) for agent in agents}
+        ospace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in agents}
         return ospace
 
     def get_spaces(self, agents):
@@ -80,7 +80,7 @@ class MyEnv(ParallelEnv):
         #     df = self.grid.df
         # df = pd.read_csv(f'temp_{index}.csv')
         obs = self.grid.df.set_index('name').to_dict()['observation']
-        obs = {k: np.array([obs[k]]) for k in self.agents}
+        obs = {k: np.array([obs[k]], dtype=np.float32) for k in self.agents}
         return obs
 
     def get_reward(self):
