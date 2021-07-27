@@ -5,12 +5,11 @@
 #SBATCH --cpus-per-task=2  #Allocate whatever you need here
 #SBATCH --output=scaled_cubic.out
 #SBATCH --job-name=test
-#SBATCH --time=1-00:00:00
+#SBATCH --time=02:00:00
 #SBATCH --mail-user=aipi0122@colorado.edu
 #SBATCH --mail-type=ALL
 
 module purge
 source /curc/sw/anaconda3/2019.07/bin/activate
-conda activate cities
-python -u pezTest.py
-python -u pezEval.py
+conda activate myenv
+python -u rayTest.py
