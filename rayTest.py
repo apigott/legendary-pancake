@@ -45,11 +45,11 @@ class MyGrid:
         return clusters
 
     def get_action_space(self, agents):
-        aspace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=2*np.ones(1)) for agent in agents}
+        aspace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=1*np.ones(1)) for agent in agents}
         return aspace
 
     def get_observation_space(self, agents):
-        ospace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=2*np.ones(1)) for agent in agents}
+        ospace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=1*np.ones(1)) for agent in agents}
         return ospace
 
     def get_spaces(self, agents):
@@ -106,7 +106,7 @@ class MyEnv(ParallelEnv):
         #     print(df)
 
         for agent in action_dict.keys():
-            self.grid.df.loc[self.grid.df.name==agent, 'observation'] = action_dict[agent]
+            self.grid.df.loc[self.grid.df.name==agent, 'observation'] = np.clip(action_dict[agent],-1,1)
 
         obs = self.state()
         # df.to_csv(f'temp_{index}.csv', index=False)
