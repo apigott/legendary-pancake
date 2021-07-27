@@ -45,11 +45,11 @@ class MyGrid:
         return clusters
 
     def get_action_space(self, agents):
-        aspace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in agents}
+        aspace = {agent: gym.spaces.Box(low=-1*np.ones(10), high=np.ones(10)) for agent in agents}
         return aspace
 
     def get_observation_space(self, agents):
-        ospace = {agent: gym.spaces.Box(low=-1*np.ones(1), high=np.ones(1)) for agent in agents}
+        ospace = {agent: gym.spaces.Box(low=-1*np.ones(10), high=np.ones(10)) for agent in agents}
         return ospace
 
     def get_spaces(self, agents):
