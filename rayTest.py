@@ -11,8 +11,6 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from ray.rllib.env.wrappers.pettingzoo_env import ParallelPettingZooEnv
 
 from ray.tune.registry import register_env
-from stable_baselines3.ppo import MlpPolicy
-from stable_baselines3 import PPO
 import supersuit as ss
 from pettingzoo import ParallelEnv
 import pandas as pd
