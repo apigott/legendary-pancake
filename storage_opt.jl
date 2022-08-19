@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.9
+# v0.19.11
 
 using Markdown
 using InteractiveUtils
@@ -15,7 +15,6 @@ begin
 	import JuMP
 	import PlutoUI
 	using PowerModelsDistribution 
-	import InfrastructureModels
 	import Ipopt
 	import Plots
 end
@@ -66,37 +65,47 @@ begin
 	phase_e = [data_eng["load"][id]["connections"][1] for id in load_e]
 end;
 
+# ╔═╡ c928bfec-7451-42ac-b6ab-4c2357a24204
+K
+
 # ╔═╡ a6d10799-1b38-4768-af1f-6a394adb40c0
 begin
 	data_eng["time_series"] = Dict{String, Any}()
-	data_eng["time_series"]["normalized_load_profile"] = Dict{String, Any}(
+	data_eng["time_series"]["sine_load_profile"] = Dict{String, Any}(
 		"replace"=>false,
 		"time"=>float(K),
 		"values"=>0.2*cos.((pi/2/maximum(K)).*K)
 	)
 
-	for (_, load) in data_eng["load"]
+	
+
+	for (k, load) in data_eng["load"]
+		data_eng["time_series"]["rand_load_profile_$k"] = Dict{String, Any}(
+			"replace"=>false,
+			"time"=>float(K),
+			"values"=>[rand([0.15,0.2]) for _ in K]
+		)
 		load["time_series"] = Dict(
-			"pd_nom"=>"normalized_load_profile",
-			"qd_nom"=>"normalized_load_profile"
+			"pd_nom"=>"rand_load_profile_$k",
+			"qd_nom"=>"rand_load_profile_$k"
 		)
 	end
 	
 	data_eng["storage"] = Dict{String, Any}()
 
-	# assume values are in MW/MWh
+	# assume values are in kW/kWh
 	for e in EVs
 		data_eng["storage"]["EV_stor_$e"] = Dict{String, Any}(
 			"status" => PMD.ENABLED,
 			"bus" => bus_e[e],
 			"connections" => [phase_e[e], 4],
 			"configuration" => PMD.WYE,
-			"energy" => 0.005,
-			"qs_ub" => 0.01, # reactive power ub?
-			"qs_lb" => -0.01, # reactive power lb?
-			"energy_ub" => 0.01, # e_max
-			"charge_ub" => 0.005, # p_c_max
-			"discharge_ub" => 0.005, # p_d_max
+			"energy" => 6,
+			"qs_ub" => 1, # reactive power ub?
+			"qs_lb" => -1, # reactive power lb?
+			"energy_ub" => 13, # e_max
+			"charge_ub" => 5, # p_c_max
+			"discharge_ub" => 5, # p_d_max
 			"charge_efficiency" => 0.97, # eta_c
 			"discharge_efficiency" => 0.95, # eta_d
 			"rs" => 0.1, # r_sp?
@@ -110,6 +119,9 @@ begin
 	end
 end
 
+# ╔═╡ 933e5bff-ad29-4230-92e2-98dfd4a3361d
+data_eng["load"]
+
 # ╔═╡ 2f996a49-e40a-4741-910c-ef3210065ceb
 data_math_mn = transform_data_model(data_eng, multinetwork=true);
 
@@ -122,42 +134,88 @@ pm = PMD.instantiate_mc_model(data_math_mn, PMD.ACPUPowerModel, PMD.build_mn_mc_
 # ╔═╡ 29c6656c-855b-49a1-a178-c7a5e9d78532
 res = solve_mn_mc_opf(data_eng, ACPUPowerModel, Ipopt.Optimizer, setting=Dict("output"=>Dict("duals"=>true)));
 
+# ╔═╡ d5eac149-a123-475a-91d3-64836e13a901
+sum(res["solution"]["nw"][string(1)]["voltage_source"]["source"]["pg"])
+
+# ╔═╡ 26a98b78-7d06-4f98-ae9a-da51c2ea2a89
+begin
+	bus_l = [data_eng["load"]["load$i"]["bus"] for i in 1:55]
+	phase_l = [data_eng["load"]["load$i"]["connections"][1] for i in 1:55]
+end
+
+# ╔═╡ 517bdff0-277b-45eb-a093-e9101ad30f43
+[res["solution"]["nw"][string(1)]["bus"][bus_l[i]]["lam_kcl_r"][phase_l[i]] for i in 1:55]
+
 # ╔═╡ fca19504-074a-48f3-aba6-a6209eaa7c70
 begin
-	ses = [res["solution"]["nw"][string(k)]["storage"]["EV_stor_1"]["se"] for k in nw_ids(pm)]
-	pss = [res["solution"]["nw"][string(k)]["storage"]["EV_stor_1"]["ps"][1] for k in nw_ids(pm)]
-	busps = [[res["solution"]["nw"][string(k)]["load"]["load$l"]["pd_bus"][1] for k in nw_ids(pm)] for l in collect(1:55)]
-	loadps = [[res["solution"]["nw"][string(k)]["load"]["load$l"]["pd"][1] for k in nw_ids(pm)] for l in collect(1:55)]
+	ses = [res["solution"]["nw"][string(k)]["storage"]["EV_stor_1"]["se"] for k in 1:10]
+	scs = [res["solution"]["nw"][string(k)]["storage"]["EV_stor_1"]["sc"] for k in 1:10]
+	sds = [res["solution"]["nw"][string(k)]["storage"]["EV_stor_1"]["sd"] for k in 1:10]
+	pss = [res["solution"]["nw"][string(k)]["storage"]["EV_stor_1"]["ps"][1] for k in 1:10]
+	busps = [[res["solution"]["nw"][string(k)]["load"]["load$l"]["pd_bus"][1] for k in 1:10] for l in collect(1:55)]
+	loadps = [[res["solution"]["nw"][string(k)]["load"]["load$l"]["pd"][1] for k in 1:10] for l in collect(1:55)]
+	genps = [[sum(res["solution"]["nw"][string(k)]["voltage_source"]["source"]["pg"]) for k in 1:10] for l in collect(1:55)]
+	lmps = [[res["solution"]["nw"][string(k)]["bus"][bus_l[i]]["lam_kcl_r"][phase_l[i]] for k in 1:10] for i in 1:55]
 end;
 
 # ╔═╡ e78cf659-fe24-49e7-a9fb-e00d3d3bf90b
 begin
 	Plots.plot(legend=:none, title="", xlabel="time [h]")
-	for e in EVs
-		Plots.plot!(timestamps[1:10], pss, markershape=:circle, markersize=3, legend=:topright, labels="P (MW)", left_margin=5Plots.mm, right_margin=15Plots.mm)
-	end
+	# Plots.plot!(timestamps[1:10], pss, markershape=:circle, markersize=3, legend=:topright, labels="P (kW)", left_margin=5Plots.mm, right_margin=15Plots.mm)
+	Plots.plot!(timestamps[1:10], scs, markershape=:circle, markersize=3, legend=:topright, labels="charge (?)", left_margin=5Plots.mm, right_margin=15Plots.mm, color=:green)
+	Plots.plot!(timestamps[1:10], sds, markershape=:circle, markersize=3, legend=:topright, labels="discharge (?)", left_margin=5Plots.mm, right_margin=15Plots.mm, color=:red)
+	Plots.yaxis!("P_load [kW]")
 	subplot = Plots.twinx()
-	Plots.plot!(subplot, timestamps[1:10], ses, markershape=:circle, markersize=3, legend=:bottomright, labels="SE = ?", left_margin=5Plots.mm, right_margin=15Plots.mm)
+	Plots.plot!(subplot, timestamps[1:10], ses, markershape=:circle, markersize=3, legend=:bottomright, labels="SOC (kWh)", left_margin=5Plots.mm, right_margin=15Plots.mm, color=:cornflowerblue)
+	# Plots.plot!(legend=:none, title="", xlabel="time [h]", ylabel=[","SOC"])
+	# Plots.yaxis!(subplot,"SOC [kWh]")
 	Plots.plot!()
+	
 end
 
 # ╔═╡ bf50eaef-a23f-4ccc-a162-39c12159523f
 begin
 	Plots.plot(legend=:none, title="", xlabel="time [h]", ylabel="P_load [kW]")
-	for e in EVs
-		Plots.plot!(timestamps[1:10], loadps, markershape=:circle, markersize=3)
-	end
+	Plots.plot!(timestamps[1:10], loadps, markershape=:circle, markersize=3)
+	Plots.plot!(timestamps[1:10], genps, markershape=:circle, markersize=3)
 	Plots.plot!()
 end
 
-# ╔═╡ ccdee275-7e25-4558-b3f0-17515c3991ab
+# ╔═╡ 04da7682-ec31-48b8-ad3e-55eefda9be0f
 begin
-	Plots.plot(legend=:none, title="", xlabel="time [h]", ylabel="E [kW]")
-	for e in EVs
-		Plots.plot!(timestamps[1:10], data_eng["time_series"]["normalized_load_profile"]["values"], markershape=:circle, markersize=3)
+	vm_pu_lk = fill(NaN, length(data_eng["load"]), length(K))
+	for k in K, l in 1:10
+		if l < 7
+			bus_id = data_eng["load"]["load$l"]["bus"]
+			bus_ind = data_math_mn["bus_lookup"]["1"][bus_id]
+			sol_bus = res["solution"]["nw"]["$k"]["bus"][bus_id]
+			data_bus = data_eng["bus"][bus_id]
+			vbase = data_math_mn["nw"]["$k"]["bus"]["$bus_id"]["vbase"]
+			phase = data_eng["load"]["load$l"]["connections"][1]
+			ind = findfirst(data_bus["terminals"].==phase)
+			vm_pu_lk[l,k] = abs(sol_bus["vm"][ind])/vbase
+		end
 	end
+	
+	Plots.plot(xlabel="time [h]", ylabel="load phase voltage [pu]", legend=:none)
+	Plots.plot!([timestamps[K[1]], timestamps[K[end]]], [0.9, 0.9], color=:red, linewidth=3)
+	Plots.plot!([timestamps[K[1]], timestamps[K[end]]], [1.1, 1.1], color=:red, linewidth=3)
+	for k in K
+		Plots.scatter!(fill(timestamps[k], length(data_eng["load"])), vm_pu_lk[:,k], markershape=:circle, markersize=3, label="")
+	end
+	Plots.
 	Plots.plot!()
 end
+
+# ╔═╡ ee43c65c-10f5-4259-ab6e-231c9db50187
+begin
+	Plots.plot(legend=:none, title="", xlabel="time [h]", ylabel="LMP (USD/kW)")
+	Plots.scatter!(timestamps[1:10], lmps, markershape=:circle, markersize=3)
+	Plots.plot!()
+end
+
+# ╔═╡ 2e9574d1-d168-4fa2-8167-3199f273a59f
+
 
 # ╔═╡ Cell order:
 # ╠═0e208c9f-6ee4-45a2-9402-2352738e716c
@@ -171,12 +229,19 @@ end
 # ╠═848d6340-455c-4a58-b068-994b0fbebfbc
 # ╠═f0860ab8-c0ed-43f9-af2a-e6c9c2600562
 # ╠═f9c63959-2cae-497f-8e5d-100c1dd71195
+# ╠═c928bfec-7451-42ac-b6ab-4c2357a24204
 # ╠═a6d10799-1b38-4768-af1f-6a394adb40c0
+# ╠═933e5bff-ad29-4230-92e2-98dfd4a3361d
 # ╠═2f996a49-e40a-4741-910c-ef3210065ceb
 # ╠═81d42809-16e5-4d49-b602-016cd7b369dd
 # ╠═010f13db-fce4-4f30-8887-5d7c9ff1d32d
 # ╠═29c6656c-855b-49a1-a178-c7a5e9d78532
+# ╠═d5eac149-a123-475a-91d3-64836e13a901
+# ╠═517bdff0-277b-45eb-a093-e9101ad30f43
+# ╠═26a98b78-7d06-4f98-ae9a-da51c2ea2a89
 # ╠═fca19504-074a-48f3-aba6-a6209eaa7c70
 # ╠═e78cf659-fe24-49e7-a9fb-e00d3d3bf90b
 # ╠═bf50eaef-a23f-4ccc-a162-39c12159523f
-# ╠═ccdee275-7e25-4558-b3f0-17515c3991ab
+# ╠═04da7682-ec31-48b8-ad3e-55eefda9be0f
+# ╠═ee43c65c-10f5-4259-ab6e-231c9db50187
+# ╠═2e9574d1-d168-4fa2-8167-3199f273a59f
