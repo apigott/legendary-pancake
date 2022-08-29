@@ -65,25 +65,19 @@ begin
 	phase_e = [data_eng["load"][id]["connections"][1] for id in load_e]
 end;
 
-# ╔═╡ c928bfec-7451-42ac-b6ab-4c2357a24204
-K
-
 # ╔═╡ a6d10799-1b38-4768-af1f-6a394adb40c0
 begin
 	data_eng["time_series"] = Dict{String, Any}()
-	data_eng["time_series"]["sine_load_profile"] = Dict{String, Any}(
-		"replace"=>false,
-		"time"=>float(K),
-		"values"=>0.2*cos.((pi/2/maximum(K)).*K)
-	)
-
-	
 
 	for (k, load) in data_eng["load"]
+		load["connections"] = [1,2,3,4]
+		load["pd"] = [1,1,1]
+		load["qd"] = rand([0.35, 0.6]) * [1,1,1]
+		
 		data_eng["time_series"]["rand_load_profile_$k"] = Dict{String, Any}(
 			"replace"=>false,
 			"time"=>float(K),
-			"values"=>[rand([0.15,0.2]) for _ in K]
+			"values"=>[rand([0.15,0.2])*[1,1,1] for _ in K]
 		)
 		load["time_series"] = Dict(
 			"pd_nom"=>"rand_load_profile_$k",
@@ -118,9 +112,6 @@ begin
 
 	end
 end
-
-# ╔═╡ 933e5bff-ad29-4230-92e2-98dfd4a3361d
-data_eng["load"]
 
 # ╔═╡ 2f996a49-e40a-4741-910c-ef3210065ceb
 data_math_mn = transform_data_model(data_eng, multinetwork=true);
@@ -229,9 +220,7 @@ end
 # ╠═848d6340-455c-4a58-b068-994b0fbebfbc
 # ╠═f0860ab8-c0ed-43f9-af2a-e6c9c2600562
 # ╠═f9c63959-2cae-497f-8e5d-100c1dd71195
-# ╠═c928bfec-7451-42ac-b6ab-4c2357a24204
 # ╠═a6d10799-1b38-4768-af1f-6a394adb40c0
-# ╠═933e5bff-ad29-4230-92e2-98dfd4a3361d
 # ╠═2f996a49-e40a-4741-910c-ef3210065ceb
 # ╠═81d42809-16e5-4d49-b602-016cd7b369dd
 # ╠═010f13db-fce4-4f30-8887-5d7c9ff1d32d
